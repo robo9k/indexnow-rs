@@ -1,0 +1,3 @@
+https://www.example.com/url1
+https://www.example.com/folder/url2
+https://www.example.com/url3
