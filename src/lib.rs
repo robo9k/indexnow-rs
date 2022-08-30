@@ -82,6 +82,45 @@ fn submit_one_request(
         .map_err(|e| crate::IndexnowError::Other(Box::new(e)))?)
 }
 
+#[derive(Debug, serde::Serialize)]
+struct UrlSet {
+    host: String,
+    key: String,
+    key_location: Option<String>,
+    url_list: Vec<String>,
+}
+
+fn submit_set_request(
+    endpoint: http::Uri,
+    key: crate::Key,
+    _key_location: Option<http::Uri>,
+    _urls: Vec<http::Uri>,
+) -> Result<
+    http::Request<impl http_body::Body<Data = impl bytes::Buf, Error = std::convert::Infallible>>,
+> {
+    let request = http::Request::builder()
+        .uri(endpoint)
+        .method(http::Method::POST)
+        .header(
+            http::header::CONTENT_TYPE,
+            /*headers::ContentType::json()*/ "application/json",
+        );
+
+    let url_set = UrlSet {
+        host: "".to_string(),
+        key: key.0,
+        key_location: None,
+        url_list: vec![],
+    };
+
+    let body =
+        serde_json::to_vec(&url_set).map_err(|e| crate::IndexnowError::Other(Box::new(e)))?;
+
+    Ok(request
+        .body(http_body::Full::new(bytes::Bytes::from(body)))
+        .map_err(|e| crate::IndexnowError::Other(Box::new(e)))?)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -113,6 +152,43 @@ mod tests {
 
         assert_eq!(*request.uri(), "https://api.indexnow.org/indexnow?url=http%3A%2F%2Fwww.example.com%2Fproduct.html&key=687a308e4eff49f994d89eb22f764514&keyLocation=http%3A%2F%2Fwww.example.com%2FmyIndexNowKey63638.txt");
         assert_eq!(request.method(), http::Method::GET);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_submit_set_request() -> std::result::Result<(), Box<dyn std::error::Error>> {
+        use bytes::Buf as _;
+        use http_body::Body as _;
+
+        let request = submit_set_request(
+            DEFAULT_ENDPOINT.clone(),
+            "687a308e4eff49f994d89eb22f764514".parse()?,
+            None,
+            vec![
+                "https://www.example.com/url1".parse()?,
+                "https://www.example.com/folder/url2".parse()?,
+                "https://www.example.com/url3".parse()?,
+            ],
+        )?;
+
+        assert_eq!(*request.uri(), "https://api.indexnow.org/indexnow");
+        assert_eq!(request.method(), http::Method::POST);
+        assert_eq!(
+            request.headers().get("content-type").unwrap(),
+            "application/json"
+        );
+
+        let mut body = request.into_body();
+        let body_data = body.data().await.unwrap()?;
+        let chunk = body_data.chunk();
+        let json_body: serde_json::Value = serde_json::from_slice(chunk).unwrap();
+        assert_json_diff::assert_json_include!(
+            actual: json_body,
+            expected: serde_json::json!({
+                "key": "687a308e4eff49f994d89eb22f764514",
+            })
+        );
 
         Ok(())
     }
