@@ -29,7 +29,7 @@ enum CliCommands {
             max_values = 10_000,
             value_hint = clap::ValueHint::Url,
         )]
-        urls: Vec<String>,
+        urls: Vec<http::Uri>,
 
         /// URL of the key file
         #[clap(
@@ -38,7 +38,7 @@ enum CliCommands {
             env = "INDEXNOW_KEY_LOCATION",
             value_hint = clap::ValueHint::Url,
         )]
-        key_location: Option<String>,
+        key_location: Option<http::Uri>,
 
         /// Endpoint of the `IndexNow.org` search engine API
         #[clap(
@@ -47,14 +47,40 @@ enum CliCommands {
             env = "INDEXNOW_ENDPOINT",
             value_hint = clap::ValueHint::Url,
         )]
-        endpoint: Option<String>,
+        endpoint: Option<http::Uri>,
     },
 }
 
-fn main() {
+#[derive(Debug)]
+enum IndexnowCliError {
+    Indexnow,
+}
+
+#[tokio::main(flavor = "current_thread")]
+async fn main() -> Result<std::process::ExitCode, crate::IndexnowCliError> {
     let args = argfile::expand_args(argfile::parse_fromfile, argfile::PREFIX).unwrap();
     let cli = CliArguments::parse_from(args);
     println!("{:?}", cli);
+
+    match cli.command {
+        CliCommands::Submit {
+            endpoint,
+            key,
+            key_location,
+            urls,
+        } => {
+            indexnow::submit(
+                endpoint.unwrap_or(indexnow::DEFAULT_ENDPOINT.clone()),
+                key,
+                key_location,
+                urls,
+            )
+            .await
+            .map_err(|_| crate::IndexnowCliError::Indexnow)?;
+        }
+    }
+
+    Ok(std::process::ExitCode::SUCCESS)
 }
 
 #[test]
