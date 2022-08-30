@@ -12,7 +12,13 @@ enum CliCommands {
     /// Submit URLs for search engines to crawl
     Submit {
         /// Key to verify ownership of submitted URLs
-        #[clap(short = 'k', long = "key", env, hide_env_values = true, value_hint = clap::ValueHint::Other,)]
+        #[clap(
+            short = 'k',
+            long = "key",
+            env = "INDEXNOW_KEY",
+            hide_env_values = true,
+            value_hint = clap::ValueHint::Other,
+        )]
         key: String,
 
         /// Changed URLs for search engines to crawl
@@ -26,11 +32,21 @@ enum CliCommands {
         urls: Vec<String>,
 
         /// URL of the key file
-        #[clap(short = 'l', long, env, value_hint = clap::ValueHint::Url,)]
+        #[clap(
+            short = 'l',
+            long,
+            env = "INDEXNOW_KEY_LOCATION",
+            value_hint = clap::ValueHint::Url,
+        )]
         key_location: Option<String>,
 
         /// Endpoint of the `IndexNow.org` search engine API
-        #[clap(short = 'e', long, env, value_hint = clap::ValueHint::Url,)]
+        #[clap(
+            short = 'e',
+            long,
+            env = "INDEXNOW_ENDPOINT",
+            value_hint = clap::ValueHint::Url,
+        )]
         endpoint: Option<String>,
     },
 }
