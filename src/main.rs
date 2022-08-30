@@ -19,7 +19,7 @@ enum CliCommands {
             hide_env_values = true,
             value_hint = clap::ValueHint::Other,
         )]
-        key: String,
+        key: indexnow::Key,
 
         /// Changed URLs for search engines to crawl
         #[clap(
