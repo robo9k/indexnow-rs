@@ -26,7 +26,7 @@ enum CliCommands {
             value_name = "URL",
             required = true,
             use_value_delimiter = false,
-            max_values = 10_000,
+            num_args = 1..=10_000,
             value_hint = clap::ValueHint::Url,
         )]
         urls: Vec<http::Uri>,
