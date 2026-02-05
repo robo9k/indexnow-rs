@@ -1,8 +1,5 @@
 #[derive(Debug, thiserror::Error)]
 pub enum IndexnowError {
-    #[error("Invalid key")]
-    InvalidKey,
-
     #[error(transparent)]
     Other(#[from] Box<dyn std::error::Error + Send + Sync + 'static>),
 }
@@ -17,16 +14,20 @@ static KEY_REGEX: once_cell::sync::Lazy<regex::Regex> = once_cell::sync::Lazy::n
 });
 
 impl std::str::FromStr for Key {
-    type Err = IndexnowError;
+    type Err = ParseKeyError;
 
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
         if KEY_REGEX.is_match(s) {
             Ok(Self(s.to_string()))
         } else {
-            Err(IndexnowError::InvalidKey)
+            Err(ParseKeyError(()))
         }
     }
 }
+
+#[derive(Debug, thiserror::Error)]
+#[error("Invalid key")]
+pub struct ParseKeyError(());
 
 pub static DEFAULT_ENDPOINT: once_cell::sync::Lazy<http::Uri> = once_cell::sync::Lazy::new(|| {
     "https://api.indexnow.org/indexnow"
