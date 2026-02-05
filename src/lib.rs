@@ -9,7 +9,7 @@ pub enum IndexnowError {
 
 pub type Result<T> = std::result::Result<T, crate::IndexnowError>;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Key(String);
 
 static KEY_REGEX: once_cell::sync::Lazy<regex::Regex> = once_cell::sync::Lazy::new(|| {
@@ -117,7 +117,7 @@ fn submit_set_request(
         serde_json::to_vec(&url_set).map_err(|e| crate::IndexnowError::Other(Box::new(e)))?;
 
     Ok(request
-        .body(http_body::Full::new(bytes::Bytes::from(body)))
+        .body(http_body_util::Full::new(bytes::Bytes::from(body)))
         .map_err(|e| crate::IndexnowError::Other(Box::new(e)))?)
 }
 
@@ -158,8 +158,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_submit_set_request() -> std::result::Result<(), Box<dyn std::error::Error>> {
-        use bytes::Buf as _;
-        use http_body::Body as _;
+        use http_body_util::BodyExt as _;
 
         let request = submit_set_request(
             DEFAULT_ENDPOINT.clone(),
@@ -179,10 +178,9 @@ mod tests {
             "application/json"
         );
 
-        let mut body = request.into_body();
-        let body_data = body.data().await.unwrap()?;
-        let chunk = body_data.chunk();
-        let json_body: serde_json::Value = serde_json::from_slice(chunk).unwrap();
+        let body = request.into_body();
+        let body_data = body.collect().await?.to_bytes();
+        let json_body: serde_json::Value = serde_json::from_slice(&body_data).unwrap();
         assert_json_diff::assert_json_include!(
             actual: json_body,
             expected: serde_json::json!({
