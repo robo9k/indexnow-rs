@@ -46,8 +46,9 @@ enum CliCommands {
             long,
             env = "INDEXNOW_ENDPOINT",
             value_hint = clap::ValueHint::Url,
+            default_value_t,
         )]
-        endpoint: Option<http::Uri>,
+        endpoint: indexnow::EndpointUrl,
     },
 }
 
@@ -69,14 +70,9 @@ async fn main() -> Result<std::process::ExitCode, crate::IndexnowCliError> {
             key_location,
             urls,
         } => {
-            indexnow::submit(
-                endpoint.unwrap_or(indexnow::DEFAULT_ENDPOINT.clone()),
-                key,
-                key_location,
-                urls,
-            )
-            .await
-            .map_err(|_| crate::IndexnowCliError::Indexnow)?;
+            indexnow::submit(endpoint, key, key_location, urls)
+                .await
+                .map_err(|_| crate::IndexnowCliError::Indexnow)?;
         }
     }
 
