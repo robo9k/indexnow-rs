@@ -38,7 +38,7 @@ enum CliCommands {
             env = "INDEXNOW_KEY_LOCATION",
             value_hint = clap::ValueHint::Url,
         )]
-        key_location: Option<http::Uri>,
+        key_location: Option<indexnow::KeyfileUrl>,
 
         /// Endpoint of the `IndexNow.org` search engine API
         #[clap(
@@ -70,6 +70,10 @@ async fn main() -> Result<std::process::ExitCode, crate::IndexnowCliError> {
             key_location,
             urls,
         } => {
+            let key_location = match key_location {
+                None => indexnow::KeyfileLocation::RootDirectory,
+                Some(url) => indexnow::KeyfileLocation::Url(url),
+            };
             indexnow::submit(endpoint, key, key_location, urls)
                 .await
                 .map_err(|_| crate::IndexnowCliError::Indexnow)?;
