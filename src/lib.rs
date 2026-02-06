@@ -175,11 +175,65 @@ impl std::convert::From<KeyfileUrl> for KeyfileLocation {
     }
 }
 
+/// Absolute URL of changed content on your site
+///
+/// ```rust
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// # use indexnow::ContentUrl;
+/// let content_url = "https://www.example.com/product.html".parse::<ContentUrl>()?;
+/// # Ok(())
+/// # }
+/// ```
+// TODO: Clone, PartialEq ↔ &str, TryFrom &[u8], TryFrom Vec<u8>, TryFrom &str, TryFrom String, Hash
+// TODO: serde::Serialize, serde::Deserialize try_from
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(into = "String")]
+pub struct ContentUrl(http::Uri);
+
+impl std::fmt::Display for ContentUrl {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl std::str::FromStr for ContentUrl {
+    type Err = ParseContentUrlError;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        use http::uri::Scheme;
+
+        let uri = s
+            .parse::<http::Uri>()
+            .map_err(|_e| ParseContentUrlError(()))?;
+
+        if let Some(scheme) = uri.scheme() {
+            if !(scheme == &Scheme::HTTP || scheme == &Scheme::HTTPS) {
+                return Err(ParseContentUrlError(()));
+            }
+        } else {
+            return Err(ParseContentUrlError(()));
+        }
+
+        let content = Self(uri);
+        Ok(content)
+    }
+}
+
+impl std::convert::From<ContentUrl> for String {
+    fn from(value: ContentUrl) -> Self {
+        value.to_string()
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("Invalid content URL")]
+pub struct ParseContentUrlError(());
+
 pub async fn submit(
     endpoint: EndpointUrl,
     key: crate::Key,
     key_location: KeyfileLocation,
-    urls: Vec<http::Uri>,
+    urls: Vec<ContentUrl>,
 ) -> Result<()> {
     if urls.len() == 1 {
         let request = submit_one_request(endpoint, key, key_location, urls[0].clone()).unwrap();
@@ -188,23 +242,15 @@ pub async fn submit(
     todo!();
 }
 
-fn serialize_uri<S>(uri: &http::Uri, serializer: S) -> std::result::Result<S::Ok, S::Error>
-where
-    S: serde::Serializer,
-{
-    serializer.collect_str(uri)
-}
-
 fn submit_one_request(
     endpoint: EndpointUrl,
     key: crate::Key,
     key_location: KeyfileLocation,
-    url: http::Uri,
+    url: ContentUrl,
 ) -> Result<http::Request<()>> {
     #[derive(Debug, serde::Serialize)]
     struct Query {
-        #[serde(serialize_with = "serialize_uri")]
-        url: http::Uri,
+        url: ContentUrl,
         key: Key,
         #[serde(
             rename = "keyLocation",
@@ -253,14 +299,14 @@ struct UrlSet {
         skip_serializing_if = "KeyfileLocation::is_rootdirectory"
     )]
     key_location: KeyfileLocation,
-    url_list: Vec<String>,
+    url_list: Vec<ContentUrl>,
 }
 
 fn submit_set_request(
     endpoint: EndpointUrl,
     key: crate::Key,
     key_location: KeyfileLocation,
-    _urls: Vec<http::Uri>,
+    _urls: Vec<ContentUrl>,
 ) -> Result<
     http::Request<impl http_body::Body<Data = impl bytes::Buf, Error = std::convert::Infallible>>,
 > {
