@@ -293,27 +293,33 @@ fn submit_one_request(
         .map_err(|e| crate::IndexnowError::Other(Box::new(e)))?)
 }
 
-#[derive(Debug, serde::Serialize)]
-struct UrlSet {
-    host: String,
-    key: Key,
-    #[serde(
-        rename = "keyLocation",
-        default,
-        skip_serializing_if = "KeyfileLocation::is_rootdirectory"
-    )]
-    key_location: KeyfileLocation,
-    url_list: Vec<ContentUrl>,
-}
-
 fn submit_set_request(
     endpoint: EndpointUrl,
     key: crate::Key,
     key_location: KeyfileLocation,
-    _urls: Vec<ContentUrl>,
+    urls: Vec<ContentUrl>,
 ) -> Result<
     http::Request<impl http_body::Body<Data = impl bytes::Buf, Error = std::convert::Infallible>>,
 > {
+    #[derive(Debug, serde::Serialize)]
+    struct UrlSet<'a> {
+        host: &'a str,
+        key: &'a Key,
+        #[serde(
+            rename = "keyLocation",
+            default,
+            skip_serializing_if = "KeyfileLocation::is_rootdirectory"
+        )]
+        key_location: &'a KeyfileLocation,
+        #[serde(rename = "urlList")]
+        url_list: &'a [ContentUrl],
+    }
+
+    let host = urls[0]
+        .0
+        .host()
+        .expect("validated newtype URL to have host");
+
     let request = http::Request::builder()
         .uri(endpoint.0)
         .method(http::Method::POST)
@@ -323,10 +329,10 @@ fn submit_set_request(
         );
 
     let url_set = UrlSet {
-        host: "".to_string(),
-        key,
-        key_location,
-        url_list: vec![],
+        host,
+        key: &key,
+        key_location: &key_location,
+        url_list: &urls,
     };
 
     let body =
@@ -449,7 +455,13 @@ mod tests {
         assert_json_diff::assert_json_include!(
             actual: json_body,
             expected: serde_json::json!({
+                "host": "www.example.com",
                 "key": "687a308e4eff49f994d89eb22f764514",
+                "urlList": vec![
+                    "https://www.example.com/url1",
+                    "https://www.example.com/folder/url2",
+                    "https://www.example.com/url3",
+                ],
             })
         );
 
@@ -485,8 +497,14 @@ mod tests {
         assert_json_diff::assert_json_include!(
             actual: json_body,
             expected: serde_json::json!({
+                "host": "www.example.com",
                 "key": "687a308e4eff49f994d89eb22f764514",
                 "keyLocation": "https://www.example.com/myIndexNowKey63638.txt",
+                "urlList": vec![
+                    "https://www.example.com/url1",
+                    "https://www.example.com/folder/url2",
+                    "https://www.example.com/url3",
+                ],
             })
         );
 
