@@ -229,6 +229,10 @@ impl std::convert::From<ContentUrl> for String {
 #[error("Invalid content URL")]
 pub struct ParseContentUrlError(());
 
+// TODO: 1 <= urls.len <= 10_000
+// TODO: urls[0].host == key_location.host
+// TODO: urls[0].host == urls[*].host
+// TODO: urls[*].path startsWith key_location.path.directory
 pub async fn submit(
     endpoint: EndpointUrl,
     key: crate::Key,
