@@ -29,7 +29,7 @@ enum CliCommands {
             num_args = 1..=10_000,
             value_hint = clap::ValueHint::Url,
         )]
-        urls: Vec<http::Uri>,
+        urls: Vec<indexnow::ContentUrl>,
 
         /// URL of the key file
         #[clap(
