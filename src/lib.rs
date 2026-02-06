@@ -233,17 +233,27 @@ pub struct ParseContentUrlError(());
 // TODO: urls[0].host == key_location.host
 // TODO: urls[0].host == urls[*].host
 // TODO: urls[*].path startsWith key_location.path.directory
+// TODO: is wrangling newtypes infallible?
 pub async fn submit(
     endpoint: EndpointUrl,
     key: crate::Key,
     key_location: KeyfileLocation,
     urls: Vec<ContentUrl>,
 ) -> Result<()> {
-    if urls.len() == 1 {
-        let request = submit_one_request(endpoint, key, key_location, urls[0].clone()).unwrap();
-        println!("Request: {:?}", request);
-    }
-    todo!();
+    match urls.len() {
+        0 => panic!("TODO: need to error out properly here, or do we? what does it mean to submit no URLs? can it fail?"),
+        1 => {
+            let request = submit_one_request(endpoint, key, key_location, urls[0].clone())?;
+            println!("Request: {:?}", request);
+        }
+        _ => {
+            let request = submit_set_request(endpoint, key, key_location, urls)?;
+            println!("Request: {:?}", request);
+        }
+    };
+
+    // sans-io so far, return http::Request<impl Body> ?
+    todo!()
 }
 
 fn submit_one_request(
@@ -251,7 +261,11 @@ fn submit_one_request(
     key: crate::Key,
     key_location: KeyfileLocation,
     url: ContentUrl,
-) -> Result<http::Request<()>> {
+) -> Result<
+    http::Request<
+        impl http_body::Body<Data = impl bytes::Buf, Error = std::convert::Infallible> + std::fmt::Debug,
+    >,
+> {
     #[derive(Debug, serde::Serialize)]
     struct Query {
         url: ContentUrl,
@@ -289,7 +303,7 @@ fn submit_one_request(
         .method(http::Method::GET);
 
     Ok(request
-        .body(())
+        .body(http_body_util::Empty::<bytes::Bytes>::new())
         .map_err(|e| crate::IndexnowError::Other(Box::new(e)))?)
 }
 
@@ -299,7 +313,9 @@ fn submit_set_request(
     key_location: KeyfileLocation,
     urls: Vec<ContentUrl>,
 ) -> Result<
-    http::Request<impl http_body::Body<Data = impl bytes::Buf, Error = std::convert::Infallible>>,
+    http::Request<
+        impl http_body::Body<Data = impl bytes::Buf, Error = std::convert::Infallible> + std::fmt::Debug,
+    >,
 > {
     #[derive(Debug, serde::Serialize)]
     struct UrlSet<'a> {
