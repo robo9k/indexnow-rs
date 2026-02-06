@@ -65,7 +65,7 @@ impl std::default::Default for EndpointUrl {
 #[error("Invalid endpoint URL")]
 pub struct ParseEndpointUrlError(());
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct Key(String);
 
 static KEY_REGEX: once_cell::sync::Lazy<regex::Regex> = once_cell::sync::Lazy::new(|| {
@@ -88,10 +88,97 @@ impl std::str::FromStr for Key {
 #[error("Invalid key")]
 pub struct ParseKeyError(());
 
+/// Absolute URL of a key file within your host
+///
+/// This is for [explicit locations of key files](`KeyfileLocation::Url`).
+///
+/// ```rust
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// # use indexnow::KeyfileUrl;
+/// let keyfile_url = "http://www.example.com/myIndexNowKey63638.txt".parse::<KeyfileUrl>()?;
+/// # Ok(())
+/// # }
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(into = "String")]
+pub struct KeyfileUrl(http::Uri);
+
+impl std::fmt::Display for KeyfileUrl {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl std::str::FromStr for KeyfileUrl {
+    type Err = ParseKeyfileUrlError;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        use http::uri::Scheme;
+
+        let uri = s
+            .parse::<http::Uri>()
+            .map_err(|_e| ParseKeyfileUrlError(()))?;
+
+        if let Some(scheme) = uri.scheme() {
+            if !(scheme == &Scheme::HTTP || scheme == &Scheme::HTTPS) {
+                return Err(ParseKeyfileUrlError(()));
+            }
+        } else {
+            return Err(ParseKeyfileUrlError(()));
+        }
+
+        let keyfile = Self(uri);
+        Ok(keyfile)
+    }
+}
+
+impl std::convert::From<KeyfileUrl> for String {
+    fn from(value: KeyfileUrl) -> Self {
+        value.to_string()
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("Invalid key file URL")]
+pub struct ParseKeyfileUrlError(());
+
+/// Location of a key file on your host
+#[derive(Debug, Default, PartialEq, Eq, serde::Serialize)]
+// FIXME: Might be cleaner to impl Serialize as Into Option<KeyfileUrl> (RootDirectory null instead of "RootDirectory"), but still needs skip_serializing_if on outer structs
+// NOTE: From Option<KeyfileUrl> would also match how CLI works currently
+#[serde(untagged)]
+pub enum KeyfileLocation {
+    /// Implicit location at root directory of the host/URL
+    ///
+    /// The format is `https://{host}/{key}.txt`.
+    /// For a key of `578ca88e0a3941d2a149ae7a54cefc01` and a host of `www.example.com` this is implied to be `https://www.example.org/578ca88e0a3941d2a149ae7a54cefc01.txt`
+    #[default]
+    RootDirectory,
+    /// Absolute URL within the same host
+    ///
+    /// The filename does not have to match the key / file contents.
+    ///
+    /// Note that the directory of the keyfile determines valid URLs to be considered by the search engine;
+    /// e.g. a location of `http://example.com/catalog/key12457EDd.txt` only allows URLs starting with `http://example.com/catalog/` but not `http://example.com/help/` for example.
+    Url(KeyfileUrl),
+}
+
+impl KeyfileLocation {
+    fn is_rootdirectory(&self) -> bool {
+        Self::RootDirectory == *self
+    }
+}
+
+impl std::convert::From<KeyfileUrl> for KeyfileLocation {
+    fn from(value: KeyfileUrl) -> Self {
+        Self::Url(value)
+    }
+}
+
 pub async fn submit(
     endpoint: EndpointUrl,
     key: crate::Key,
-    key_location: Option<http::Uri>,
+    key_location: KeyfileLocation,
     urls: Vec<http::Uri>,
 ) -> Result<()> {
     if urls.len() == 1 {
@@ -101,22 +188,42 @@ pub async fn submit(
     todo!();
 }
 
+fn serialize_uri<S>(uri: &http::Uri, serializer: S) -> std::result::Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    serializer.collect_str(uri)
+}
+
 fn submit_one_request(
     endpoint: EndpointUrl,
     key: crate::Key,
-    key_location: Option<http::Uri>,
+    key_location: KeyfileLocation,
     url: http::Uri,
 ) -> Result<http::Request<()>> {
-    let mut query = vec![("url", url.to_string()), ("key", key.0)];
-
-    if let Some(key_location) = key_location {
-        query.push(("keyLocation", key_location.to_string()));
+    #[derive(Debug, serde::Serialize)]
+    struct Query {
+        #[serde(serialize_with = "serialize_uri")]
+        url: http::Uri,
+        key: Key,
+        #[serde(
+            rename = "keyLocation",
+            default,
+            skip_serializing_if = "KeyfileLocation::is_rootdirectory"
+        )]
+        key_location: KeyfileLocation,
     }
+
+    let query = Query {
+        url,
+        key,
+        key_location,
+    };
 
     let mut path_and_query = endpoint.0.path().to_owned();
     path_and_query.push('?');
     path_and_query.push_str(
-        &serde_urlencoded::to_string(query)
+        &serde_urlencoded::to_string(&query)
             .map_err(|e| crate::IndexnowError::Other(Box::new(e)))?,
     );
 
@@ -139,15 +246,20 @@ fn submit_one_request(
 #[derive(Debug, serde::Serialize)]
 struct UrlSet {
     host: String,
-    key: String,
-    key_location: Option<String>,
+    key: Key,
+    #[serde(
+        rename = "keyLocation",
+        default,
+        skip_serializing_if = "KeyfileLocation::is_rootdirectory"
+    )]
+    key_location: KeyfileLocation,
     url_list: Vec<String>,
 }
 
 fn submit_set_request(
     endpoint: EndpointUrl,
     key: crate::Key,
-    _key_location: Option<http::Uri>,
+    key_location: KeyfileLocation,
     _urls: Vec<http::Uri>,
 ) -> Result<
     http::Request<impl http_body::Body<Data = impl bytes::Buf, Error = std::convert::Infallible>>,
@@ -162,8 +274,8 @@ fn submit_set_request(
 
     let url_set = UrlSet {
         host: "".to_string(),
-        key: key.0,
-        key_location: None,
+        key,
+        key_location,
         url_list: vec![],
     };
 
@@ -233,7 +345,7 @@ mod tests {
         let request = submit_one_request(
             "https://api.indexnow.org/indexnow".parse()?,
             "687a308e4eff49f994d89eb22f764514".parse()?,
-            None,
+            KeyfileLocation::RootDirectory,
             "https://www.example.com/product.html".parse()?,
         )?;
 
@@ -249,7 +361,7 @@ mod tests {
         let request = submit_one_request(
             "https://api.indexnow.org/indexnow".parse()?,
             "687a308e4eff49f994d89eb22f764514".parse()?,
-            Some("http://www.example.com/myIndexNowKey63638.txt".parse()?),
+            KeyfileLocation::Url("http://www.example.com/myIndexNowKey63638.txt".parse()?),
             "http://www.example.com/product.html".parse()?,
         )?;
 
@@ -266,7 +378,7 @@ mod tests {
         let request = submit_set_request(
             "https://api.indexnow.org/indexnow".parse()?,
             "687a308e4eff49f994d89eb22f764514".parse()?,
-            None,
+            KeyfileLocation::RootDirectory,
             vec![
                 "https://www.example.com/url1".parse()?,
                 "https://www.example.com/folder/url2".parse()?,
@@ -288,6 +400,43 @@ mod tests {
             actual: json_body,
             expected: serde_json::json!({
                 "key": "687a308e4eff49f994d89eb22f764514",
+            })
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_submit_set_request_with_location(
+    ) -> std::result::Result<(), Box<dyn std::error::Error>> {
+        use http_body_util::BodyExt as _;
+
+        let request = submit_set_request(
+            "https://api.indexnow.org/indexnow".parse()?,
+            "687a308e4eff49f994d89eb22f764514".parse()?,
+            KeyfileLocation::Url("https://www.example.com/myIndexNowKey63638.txt".parse()?),
+            vec![
+                "https://www.example.com/url1".parse()?,
+                "https://www.example.com/folder/url2".parse()?,
+                "https://www.example.com/url3".parse()?,
+            ],
+        )?;
+
+        assert_eq!(*request.uri(), "https://api.indexnow.org/indexnow");
+        assert_eq!(request.method(), http::Method::POST);
+        assert_eq!(
+            request.headers().get("content-type").unwrap(),
+            "application/json"
+        );
+
+        let body = request.into_body();
+        let body_data = body.collect().await?.to_bytes();
+        let json_body: serde_json::Value = serde_json::from_slice(&body_data).unwrap();
+        assert_json_diff::assert_json_include!(
+            actual: json_body,
+            expected: serde_json::json!({
+                "key": "687a308e4eff49f994d89eb22f764514",
+                "keyLocation": "https://www.example.com/myIndexNowKey63638.txt",
             })
         );
 
