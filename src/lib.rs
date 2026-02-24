@@ -1,3 +1,6 @@
+pub mod client;
+pub use client::Client;
+
 #[derive(Debug, thiserror::Error)]
 pub enum IndexnowError {
     #[error(transparent)]
@@ -5,6 +8,9 @@ pub enum IndexnowError {
 }
 
 pub type Result<T> = std::result::Result<T, crate::IndexnowError>;
+
+// TODO: copy impl instead of type alias
+pub type Body = http_body_util::Full<bytes::Bytes>;
 
 /// Absolute URL of a search engine's IndexNow API endpoint
 ///
@@ -175,6 +181,19 @@ impl std::convert::From<KeyfileUrl> for KeyfileLocation {
     }
 }
 
+/// Combined [key](`Key`) its [file location](`KeyfileLocation`)
+#[derive(Debug)]
+pub struct KeyfileConfig {
+    key: Key,
+    location: KeyfileLocation,
+}
+
+impl KeyfileConfig {
+    pub fn new(key: Key, location: KeyfileLocation) -> Self {
+        Self { key, location }
+    }
+}
+
 /// Absolute URL of changed content on your site
 ///
 /// ```rust
@@ -243,11 +262,11 @@ pub async fn submit(
     match urls.len() {
         0 => panic!("TODO: need to error out properly here, or do we? what does it mean to submit no URLs? can it fail?"),
         1 => {
-            let request = submit_one_request(endpoint, key, key_location, urls[0].clone())?;
+            let request = submit_one_request(endpoint, &key, &key_location, &urls[0])?;
             println!("Request: {:?}", request);
         }
         _ => {
-            let request = submit_set_request(endpoint, key, key_location, urls)?;
+            let request = submit_set_request(endpoint, &key, &key_location, &urls)?;
             println!("Request: {:?}", request);
         }
     };
@@ -256,26 +275,22 @@ pub async fn submit(
     todo!()
 }
 
-fn submit_one_request(
+pub(crate) fn submit_one_request(
     endpoint: EndpointUrl,
-    key: crate::Key,
-    key_location: KeyfileLocation,
-    url: ContentUrl,
-) -> Result<
-    http::Request<
-        impl http_body::Body<Data = impl bytes::Buf, Error = std::convert::Infallible> + std::fmt::Debug,
-    >,
-> {
+    key: &Key,
+    key_location: &KeyfileLocation,
+    url: &ContentUrl,
+) -> Result<http::Request<Body>> {
     #[derive(Debug, serde::Serialize)]
-    struct Query {
-        url: ContentUrl,
-        key: Key,
+    struct Query<'a> {
+        url: &'a ContentUrl,
+        key: &'a Key,
         #[serde(
             rename = "keyLocation",
             default,
             skip_serializing_if = "KeyfileLocation::is_rootdirectory"
         )]
-        key_location: KeyfileLocation,
+        key_location: &'a KeyfileLocation,
     }
 
     let query = Query {
@@ -303,20 +318,16 @@ fn submit_one_request(
         .method(http::Method::GET);
 
     Ok(request
-        .body(http_body_util::Empty::<bytes::Bytes>::new())
+        .body(http_body_util::Full::<bytes::Bytes>::default())
         .map_err(|e| crate::IndexnowError::Other(Box::new(e)))?)
 }
 
-fn submit_set_request(
+pub(crate) fn submit_set_request(
     endpoint: EndpointUrl,
-    key: crate::Key,
-    key_location: KeyfileLocation,
-    urls: Vec<ContentUrl>,
-) -> Result<
-    http::Request<
-        impl http_body::Body<Data = impl bytes::Buf, Error = std::convert::Infallible> + std::fmt::Debug,
-    >,
-> {
+    key: &Key,
+    key_location: &KeyfileLocation,
+    urls: &[ContentUrl],
+) -> Result<http::Request<Body>> {
     #[derive(Debug, serde::Serialize)]
     struct UrlSet<'a> {
         host: &'a str,
