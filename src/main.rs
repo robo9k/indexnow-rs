@@ -74,9 +74,22 @@ async fn main() -> Result<std::process::ExitCode, crate::IndexnowCliError> {
                 None => indexnow::KeyfileLocation::RootDirectory,
                 Some(url) => indexnow::KeyfileLocation::Url(url),
             };
-            indexnow::submit(endpoint, key, key_location, urls)
-                .await
-                .map_err(|_| crate::IndexnowCliError::Indexnow)?;
+            let keyfile_config = indexnow::KeyfileConfig::new(key, key_location);
+
+            let client =
+                indexnow::Client::from_reqwest(endpoint, keyfile_config, reqwest::Client::new());
+
+            if urls.len() == 1 {
+                client
+                    .submit_one(&urls[0])
+                    .await
+                    .map_err(|_| crate::IndexnowCliError::Indexnow)?;
+            } else {
+                client
+                    .submit_set(&urls)
+                    .await
+                    .map_err(|_| crate::IndexnowCliError::Indexnow)?;
+            }
         }
     }
 
