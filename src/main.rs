@@ -52,9 +52,10 @@ enum CliCommands {
     },
 }
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 enum IndexnowCliError {
-    Indexnow,
+    #[error("client")]
+    Client(#[source] indexnow::client::ClientError),
 }
 
 #[tokio::main(flavor = "current_thread")]
@@ -80,15 +81,17 @@ async fn main() -> Result<std::process::ExitCode, crate::IndexnowCliError> {
                 indexnow::Client::from_reqwest(endpoint, keyfile_config, reqwest::Client::new());
 
             if urls.len() == 1 {
-                client
+                let result = client
                     .submit_one(&urls[0])
                     .await
-                    .map_err(|_| crate::IndexnowCliError::Indexnow)?;
+                    .map_err(IndexnowCliError::Client)?;
+                dbg!(&result);
             } else {
-                client
+                let result = client
                     .submit_set(&urls)
                     .await
-                    .map_err(|_| crate::IndexnowCliError::Indexnow)?;
+                    .map_err(IndexnowCliError::Client)?;
+                dbg!(&result);
             }
         }
     }

@@ -370,6 +370,59 @@ pub(crate) fn submit_set_request(
         .map_err(|e| crate::IndexnowError::Other(Box::new(e)))?)
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SubmissionSuccess {
+    /// Submission was accepted and processed
+    Ok,
+    /// Submission was accepted, but will be processed later
+    ///
+    /// Processing might fail key validation.
+    Accepted,
+}
+
+#[derive(Debug)]
+pub struct RateLimitError {
+    // TODO: headers::RetryAfter has a private enum After { DateTime(HttpDate), Delay(Seconds) }
+    // so this is roughly SystemTime | Duration
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum SubmissionError {
+    #[error("bad request")]
+    BadRequest,
+    #[error("forbidden")]
+    Forbidden,
+    #[error("unprocessable entity")]
+    UnprocessableEntity,
+    #[error("too many requests")]
+    TooManyRequests(RateLimitError),
+    // TODO: Other http::Response<B> or just http::Status ?
+}
+
+pub fn parse_response<B: http_body::Body>(
+    response: &http::Response<B>,
+) -> std::result::Result<SubmissionSuccess, SubmissionError> {
+    use http::StatusCode;
+
+    if response.status() == StatusCode::OK {
+        Ok(SubmissionSuccess::Ok)
+    } else if response.status() == StatusCode::ACCEPTED {
+        Ok(SubmissionSuccess::Accepted)
+    } else if response.status() == StatusCode::BAD_REQUEST {
+        Err(SubmissionError::BadRequest)
+    } else if response.status() == StatusCode::FORBIDDEN {
+        Err(SubmissionError::Forbidden)
+    } else if response.status() == StatusCode::UNPROCESSABLE_ENTITY {
+        Err(SubmissionError::UnprocessableEntity)
+    } else if response.status() == StatusCode::TOO_MANY_REQUESTS {
+        // TODO: parse from Retry-After response header
+        let rate_limit = RateLimitError {};
+        Err(SubmissionError::TooManyRequests(rate_limit))
+    } else {
+        panic!("Unexpected API response");
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
