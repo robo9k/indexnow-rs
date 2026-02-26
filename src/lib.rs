@@ -317,9 +317,9 @@ pub(crate) fn submit_one_request(
         .uri(http::Uri::from_parts(parts).map_err(|e| crate::IndexnowError::Other(Box::new(e)))?)
         .method(http::Method::GET);
 
-    Ok(request
+    request
         .body(http_body_util::Full::<bytes::Bytes>::default())
-        .map_err(|e| crate::IndexnowError::Other(Box::new(e)))?)
+        .map_err(|e| crate::IndexnowError::Other(Box::new(e)))
 }
 
 pub(crate) fn submit_set_request(
@@ -357,17 +357,17 @@ pub(crate) fn submit_set_request(
 
     let url_set = UrlSet {
         host,
-        key: &key,
-        key_location: &key_location,
-        url_list: &urls,
+        key,
+        key_location,
+        url_list: urls,
     };
 
     let body =
         serde_json::to_vec(&url_set).map_err(|e| crate::IndexnowError::Other(Box::new(e)))?;
 
-    Ok(request
+    request
         .body(http_body_util::Full::new(bytes::Bytes::from(body)))
-        .map_err(|e| crate::IndexnowError::Other(Box::new(e)))?)
+        .map_err(|e| crate::IndexnowError::Other(Box::new(e)))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
