@@ -499,9 +499,9 @@ mod tests {
     fn test_submit_one_request() -> std::result::Result<(), Box<dyn std::error::Error>> {
         let request = submit_one_request(
             "https://api.indexnow.org/indexnow".parse()?,
-            "687a308e4eff49f994d89eb22f764514".parse()?,
-            KeyfileLocation::RootDirectory,
-            "https://www.example.com/product.html".parse()?,
+            &"687a308e4eff49f994d89eb22f764514".parse()?,
+            &KeyfileLocation::RootDirectory,
+            &"https://www.example.com/product.html".parse()?,
         )?;
 
         assert_eq!(*request.uri(), "https://api.indexnow.org/indexnow?url=https%3A%2F%2Fwww.example.com%2Fproduct.html&key=687a308e4eff49f994d89eb22f764514");
@@ -515,9 +515,9 @@ mod tests {
     {
         let request = submit_one_request(
             "https://api.indexnow.org/indexnow".parse()?,
-            "687a308e4eff49f994d89eb22f764514".parse()?,
-            KeyfileLocation::Url("http://www.example.com/myIndexNowKey63638.txt".parse()?),
-            "http://www.example.com/product.html".parse()?,
+            &"687a308e4eff49f994d89eb22f764514".parse()?,
+            &KeyfileLocation::Url("http://www.example.com/myIndexNowKey63638.txt".parse()?),
+            &"http://www.example.com/product.html".parse()?,
         )?;
 
         assert_eq!(*request.uri(), "https://api.indexnow.org/indexnow?url=http%3A%2F%2Fwww.example.com%2Fproduct.html&key=687a308e4eff49f994d89eb22f764514&keyLocation=http%3A%2F%2Fwww.example.com%2FmyIndexNowKey63638.txt");
@@ -532,9 +532,9 @@ mod tests {
 
         let request = submit_set_request(
             "https://api.indexnow.org/indexnow".parse()?,
-            "687a308e4eff49f994d89eb22f764514".parse()?,
-            KeyfileLocation::RootDirectory,
-            vec![
+            &"687a308e4eff49f994d89eb22f764514".parse()?,
+            &KeyfileLocation::RootDirectory,
+            &vec![
                 "https://www.example.com/url1".parse()?,
                 "https://www.example.com/folder/url2".parse()?,
                 "https://www.example.com/url3".parse()?,
@@ -574,9 +574,9 @@ mod tests {
 
         let request = submit_set_request(
             "https://api.indexnow.org/indexnow".parse()?,
-            "687a308e4eff49f994d89eb22f764514".parse()?,
-            KeyfileLocation::Url("https://www.example.com/myIndexNowKey63638.txt".parse()?),
-            vec![
+            &"687a308e4eff49f994d89eb22f764514".parse()?,
+            &KeyfileLocation::Url("https://www.example.com/myIndexNowKey63638.txt".parse()?),
+            &vec![
                 "https://www.example.com/url1".parse()?,
                 "https://www.example.com/folder/url2".parse()?,
                 "https://www.example.com/url3".parse()?,
