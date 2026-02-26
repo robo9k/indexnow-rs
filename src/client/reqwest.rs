@@ -32,7 +32,7 @@ where
 
     fn call(&mut self, request: http::Request<crate::Body>) -> Self::Future {
         match request.map(reqwest::Body::wrap).try_into() {
-            Err(err) => return ReqwestFuture::Error(Some(err)),
+            Err(err) => ReqwestFuture::Error(Some(err)),
             Ok(request) => {
                 let fut = self.0.call(request);
                 ReqwestFuture::Future(fut)
