@@ -24,6 +24,7 @@ tokio = {version = "1", features = ["rt", "macros"]}
 tower = { version = "0.5", features = ["util"] }
 reqwest = { version = "0.13" }
 pin-project = "1"
+headers-retry-after = { version = "0.1.1", default-features = false }
 
 [dev-dependencies]
 assert-json-diff = "2"

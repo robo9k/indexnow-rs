@@ -493,6 +493,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "headers-retry-after"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0223aa577ae9b3129c670177eadd1584b5289b220ae420bee657c15ae453a1ad"
+dependencies = [
+ "headers-core",
+ "httpdate",
+]
+
+[[package]]
 name = "heck"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -727,6 +737,7 @@ dependencies = [
  "bytes",
  "clap",
  "headers",
+ "headers-retry-after",
  "http",
  "http-body",
  "http-body-util",
@@ -1192,7 +1203,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1790,7 +1801,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
