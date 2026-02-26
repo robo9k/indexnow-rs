@@ -380,10 +380,21 @@ pub enum SubmissionSuccess {
     Accepted,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RetryAfter {
+    Date(std::time::SystemTime),
+    Delay(std::time::Duration),
+}
+
+#[derive(Debug, Clone, Copy)]
 pub struct RateLimitError {
-    // TODO: headers::RetryAfter has a private enum After { DateTime(HttpDate), Delay(Seconds) }
-    // so this is roughly SystemTime | Duration
+    retry_after: RetryAfter,
+}
+
+impl RateLimitError {
+    pub fn retry_after(&self) -> RetryAfter {
+        self.retry_after
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -402,6 +413,7 @@ pub enum SubmissionError {
 pub fn parse_response<B: http_body::Body>(
     response: &http::Response<B>,
 ) -> std::result::Result<SubmissionSuccess, SubmissionError> {
+    use headers::HeaderMapExt as _;
     use http::StatusCode;
 
     if response.status() == StatusCode::OK {
@@ -415,11 +427,18 @@ pub fn parse_response<B: http_body::Body>(
     } else if response.status() == StatusCode::UNPROCESSABLE_ENTITY {
         Err(SubmissionError::UnprocessableEntity)
     } else if response.status() == StatusCode::TOO_MANY_REQUESTS {
-        // TODO: parse from Retry-After response header
-        let rate_limit = RateLimitError {};
+        let retry_after = response
+            .headers()
+            .typed_get()
+            .expect("HTTP `Retry-After` response header guaranteed by IndexNow API");
+        let retry_after = match retry_after {
+            headers_retry_after::RetryAfter::Date(date) => RetryAfter::Date(date),
+            headers_retry_after::RetryAfter::Delay(delay) => RetryAfter::Delay(delay),
+        };
+        let rate_limit = RateLimitError { retry_after };
         Err(SubmissionError::TooManyRequests(rate_limit))
     } else {
-        panic!("Unexpected API response");
+        panic!("Unexpected IndexNow API response");
     }
 }
 
@@ -587,6 +606,29 @@ mod tests {
                 ],
             })
         );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_parse_429_response() -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let http_response = http::Response::builder()
+            .status(http::StatusCode::TOO_MANY_REQUESTS)
+            .header("Retry-After", "666")
+            .body(String::new())?;
+
+        let response =
+            parse_response(&http_response).expect_err("HTTP response should parse as error");
+
+        match response {
+            SubmissionError::TooManyRequests(rate_limit) => {
+                assert_eq!(
+                    rate_limit.retry_after(),
+                    RetryAfter::Delay(std::time::Duration::from_secs(666))
+                );
+            }
+            _ => panic!("unexpected response"),
+        }
 
         Ok(())
     }
