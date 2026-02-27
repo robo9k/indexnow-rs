@@ -1,7 +1,8 @@
 pub mod reqwest;
 
 use crate::{
-    ContentUrl, EndpointUrl, IndexnowError, KeyfileConfig, SubmissionError, SubmissionSuccess,
+    ContentUrl, EndpointUrl, KeyfileConfig, RequestError, ResponseError, SubmissionError,
+    SubmissionSuccess,
 };
 use std::error::Error;
 use std::fmt::Debug;
@@ -12,6 +13,18 @@ pub struct Client<S> {
     keyfile: KeyfileConfig,
 
     service: S,
+}
+
+fn map_response_result(
+    result: Result<Result<SubmissionSuccess, SubmissionError>, ResponseError>,
+) -> Result<SubmissionSuccess, ClientError> {
+    match result {
+        Ok(domain) => match domain {
+            Ok(success) => Ok(success),
+            Err(domain_err) => Err(ClientError::IndexNow(domain_err)),
+        },
+        Err(technical) => Err(ClientError::Response(technical)),
+    }
 }
 
 impl<S, B> Client<S>
@@ -45,12 +58,12 @@ where
             .clone()
             .ready()
             .await
-            .map_err(|e| ClientError::Tower(Box::new(e)))?
+            .map_err(|e| ClientError::Service(Box::new(e)))?
             .call(request)
             .await
-            .map_err(|e| ClientError::Tower(Box::new(e)))?;
+            .map_err(|e| ClientError::Service(Box::new(e)))?;
 
-        crate::parse_response(&response).map_err(ClientError::IndexNow)
+        map_response_result(crate::parse_response(&response))
     }
 
     pub async fn submit_set(&self, urls: &[ContentUrl]) -> Result<SubmissionSuccess, ClientError> {
@@ -67,21 +80,23 @@ where
             .clone()
             .ready()
             .await
-            .map_err(|e| ClientError::Tower(Box::new(e)))?
+            .map_err(|e| ClientError::Service(Box::new(e)))?
             .call(request)
             .await
-            .map_err(|e| ClientError::Tower(Box::new(e)))?;
+            .map_err(|e| ClientError::Service(Box::new(e)))?;
 
-        crate::parse_response(&response).map_err(ClientError::IndexNow)
+        map_response_result(crate::parse_response(&response))
     }
 }
 
 #[derive(Debug, thiserror::Error)]
 pub enum ClientError {
     #[error("request")]
-    Request(#[source] IndexnowError),
+    Request(#[source] RequestError),
     #[error("tower-http client")]
-    Tower(#[source] Box<dyn Error>),
+    Service(#[source] Box<dyn Error>),
+    #[error("response")]
+    Response(#[source] ResponseError),
     #[error("IndexNow API")]
     IndexNow(#[source] SubmissionError),
 }

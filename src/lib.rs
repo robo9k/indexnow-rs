@@ -1,14 +1,6 @@
 pub mod client;
 pub use client::Client;
 
-#[derive(Debug, thiserror::Error)]
-pub enum IndexnowError {
-    #[error(transparent)]
-    Other(#[from] Box<dyn std::error::Error + Send + Sync + 'static>),
-}
-
-pub type Result<T> = std::result::Result<T, crate::IndexnowError>;
-
 // TODO: copy impl instead of type alias
 pub type Body = http_body_util::Full<bytes::Bytes>;
 
@@ -253,26 +245,11 @@ pub struct ParseContentUrlError(());
 // TODO: urls[0].host == urls[*].host
 // TODO: urls[*].path startsWith key_location.path.directory
 // TODO: is wrangling newtypes infallible?
-pub async fn submit(
-    endpoint: EndpointUrl,
-    key: crate::Key,
-    key_location: KeyfileLocation,
-    urls: Vec<ContentUrl>,
-) -> Result<()> {
-    match urls.len() {
-        0 => panic!("TODO: need to error out properly here, or do we? what does it mean to submit no URLs? can it fail?"),
-        1 => {
-            let request = submit_one_request(endpoint, &key, &key_location, &urls[0])?;
-            println!("Request: {:?}", request);
-        }
-        _ => {
-            let request = submit_set_request(endpoint, &key, &key_location, &urls)?;
-            println!("Request: {:?}", request);
-        }
-    };
 
-    // sans-io so far, return http::Request<impl Body> ?
-    todo!()
+#[derive(Debug, thiserror::Error)]
+#[error("request")]
+pub struct RequestError {
+    source: Box<dyn std::error::Error + Send + Sync + 'static>,
 }
 
 pub(crate) fn submit_one_request(
@@ -280,7 +257,7 @@ pub(crate) fn submit_one_request(
     key: &Key,
     key_location: &KeyfileLocation,
     url: &ContentUrl,
-) -> Result<http::Request<Body>> {
+) -> Result<http::Request<Body>, RequestError> {
     #[derive(Debug, serde::Serialize)]
     struct Query<'a> {
         url: &'a ContentUrl,
@@ -302,24 +279,27 @@ pub(crate) fn submit_one_request(
     let mut path_and_query = endpoint.0.path().to_owned();
     path_and_query.push('?');
     path_and_query.push_str(
-        &serde_urlencoded::to_string(&query)
-            .map_err(|e| crate::IndexnowError::Other(Box::new(e)))?,
+        &serde_urlencoded::to_string(&query).map_err(|e| RequestError {
+            source: Box::new(e),
+        })?,
     );
 
     let mut parts = endpoint.0.clone().into_parts();
-    parts.path_and_query = Some(
-        path_and_query
-            .parse()
-            .map_err(|e| crate::IndexnowError::Other(Box::new(e)))?,
-    );
+    parts.path_and_query = Some(path_and_query.parse().map_err(|e| RequestError {
+        source: Box::new(e),
+    })?);
 
     let request = http::Request::builder()
-        .uri(http::Uri::from_parts(parts).map_err(|e| crate::IndexnowError::Other(Box::new(e)))?)
+        .uri(http::Uri::from_parts(parts).map_err(|e| RequestError {
+            source: Box::new(e),
+        })?)
         .method(http::Method::GET);
 
     request
         .body(http_body_util::Full::<bytes::Bytes>::default())
-        .map_err(|e| crate::IndexnowError::Other(Box::new(e)))
+        .map_err(|e| RequestError {
+            source: Box::new(e),
+        })
 }
 
 pub(crate) fn submit_set_request(
@@ -327,7 +307,7 @@ pub(crate) fn submit_set_request(
     key: &Key,
     key_location: &KeyfileLocation,
     urls: &[ContentUrl],
-) -> Result<http::Request<Body>> {
+) -> Result<http::Request<Body>, RequestError> {
     #[derive(Debug, serde::Serialize)]
     struct UrlSet<'a> {
         host: &'a str,
@@ -362,12 +342,15 @@ pub(crate) fn submit_set_request(
         url_list: urls,
     };
 
-    let body =
-        serde_json::to_vec(&url_set).map_err(|e| crate::IndexnowError::Other(Box::new(e)))?;
+    let body = serde_json::to_vec(&url_set).map_err(|e| RequestError {
+        source: Box::new(e),
+    })?;
 
     request
         .body(http_body_util::Full::new(bytes::Bytes::from(body)))
-        .map_err(|e| crate::IndexnowError::Other(Box::new(e)))
+        .map_err(|e| RequestError {
+            source: Box::new(e),
+        })
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -388,11 +371,11 @@ pub enum RetryAfter {
 
 #[derive(Debug, Clone, Copy)]
 pub struct RateLimitError {
-    retry_after: RetryAfter,
+    retry_after: Option<RetryAfter>,
 }
 
 impl RateLimitError {
-    pub fn retry_after(&self) -> RetryAfter {
+    pub fn retry_after(&self) -> Option<RetryAfter> {
         self.retry_after
     }
 }
@@ -407,38 +390,44 @@ pub enum SubmissionError {
     UnprocessableEntity,
     #[error("too many requests")]
     TooManyRequests(RateLimitError),
-    // TODO: Other http::Response<B> or just http::Status ?
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum ResponseError {
+    #[error("undefined HTTP status code")]
+    UndefinedStatus(http::StatusCode),
+    #[error("can not parse header")]
+    ParseHeader(http::HeaderName, headers::Error, http::StatusCode),
 }
 
 pub fn parse_response<B: http_body::Body>(
     response: &http::Response<B>,
-) -> std::result::Result<SubmissionSuccess, SubmissionError> {
+) -> std::result::Result<Result<SubmissionSuccess, SubmissionError>, ResponseError> {
     use headers::HeaderMapExt as _;
     use http::StatusCode;
 
     if response.status() == StatusCode::OK {
-        Ok(SubmissionSuccess::Ok)
+        Ok(Ok(SubmissionSuccess::Ok))
     } else if response.status() == StatusCode::ACCEPTED {
-        Ok(SubmissionSuccess::Accepted)
+        Ok(Ok(SubmissionSuccess::Accepted))
     } else if response.status() == StatusCode::BAD_REQUEST {
-        Err(SubmissionError::BadRequest)
+        Ok(Err(SubmissionError::BadRequest))
     } else if response.status() == StatusCode::FORBIDDEN {
-        Err(SubmissionError::Forbidden)
+        Ok(Err(SubmissionError::Forbidden))
     } else if response.status() == StatusCode::UNPROCESSABLE_ENTITY {
-        Err(SubmissionError::UnprocessableEntity)
+        Ok(Err(SubmissionError::UnprocessableEntity))
     } else if response.status() == StatusCode::TOO_MANY_REQUESTS {
-        let retry_after = response
-            .headers()
-            .typed_get()
-            .expect("HTTP `Retry-After` response header guaranteed by IndexNow API");
-        let retry_after = match retry_after {
+        let retry_after = response.headers().typed_try_get().map_err(|e| {
+            ResponseError::ParseHeader(http::header::RETRY_AFTER, e, response.status())
+        })?;
+        let retry_after = retry_after.map(|ra| match ra {
             headers_retry_after::RetryAfter::Date(date) => RetryAfter::Date(date),
             headers_retry_after::RetryAfter::Delay(delay) => RetryAfter::Delay(delay),
-        };
+        });
         let rate_limit = RateLimitError { retry_after };
-        Err(SubmissionError::TooManyRequests(rate_limit))
+        Ok(Err(SubmissionError::TooManyRequests(rate_limit)))
     } else {
-        panic!("Unexpected IndexNow API response");
+        Err(ResponseError::UndefinedStatus(response.status()))
     }
 }
 
@@ -617,14 +606,13 @@ mod tests {
             .header("Retry-After", "666")
             .body(String::new())?;
 
-        let response =
-            parse_response(&http_response).expect_err("HTTP response should parse as error");
+        let response = parse_response(&http_response).expect("HTTP response should parse");
 
         match response {
-            SubmissionError::TooManyRequests(rate_limit) => {
+            Err(SubmissionError::TooManyRequests(rate_limit)) => {
                 assert_eq!(
                     rate_limit.retry_after(),
-                    RetryAfter::Delay(std::time::Duration::from_secs(666))
+                    Some(RetryAfter::Delay(std::time::Duration::from_secs(666)))
                 );
             }
             _ => panic!("unexpected response"),
