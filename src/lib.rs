@@ -66,7 +66,7 @@ pub struct ParseEndpointUrlError(());
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct Key(String);
 
-static KEY_REGEX: once_cell::sync::Lazy<regex::Regex> = once_cell::sync::Lazy::new(|| {
+static KEY_REGEX: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
     regex::Regex::new("^[a-zA-Z0-9\\-]{8,128}$").expect("static regex to be parseable")
 });
 
