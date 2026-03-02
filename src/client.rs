@@ -1,8 +1,8 @@
 pub mod reqwest;
 
 use crate::{
-    ContentUrl, EndpointUrl, KeyfileConfig, RequestError, ResponseError, SubmissionError,
-    SubmissionSuccess,
+    BuildRequestError, ContentUrl, EndpointUrl, KeyfileConfig, ParseResponseError, SubmissionError,
+    SubmissionResult, SubmissionSuccess,
 };
 use std::error::Error;
 use std::fmt::Debug;
@@ -16,14 +16,14 @@ pub struct Client<S> {
 }
 
 fn map_response_result(
-    result: Result<Result<SubmissionSuccess, SubmissionError>, ResponseError>,
+    result: Result<SubmissionResult, ParseResponseError>,
 ) -> Result<SubmissionSuccess, ClientError> {
     match result {
         Ok(domain) => match domain {
             Ok(success) => Ok(success),
             Err(domain_err) => Err(ClientError::IndexNow(domain_err)),
         },
-        Err(technical) => Err(ClientError::Response(technical)),
+        Err(technical) => Err(ClientError::ParseResponse(technical)),
     }
 }
 
@@ -45,58 +45,59 @@ where
     }
 
     pub async fn submit_one(&self, url: &ContentUrl) -> Result<SubmissionSuccess, ClientError> {
-        let request = crate::submit_one_request(
+        let request = crate::build_one_request(
             self.endpoint.clone(),
             &self.keyfile.key,
             &self.keyfile.location,
             url,
         )
-        .map_err(ClientError::Request)?;
+        .map_err(ClientError::BuildRequest)?;
 
         let response = self
             .service
             .clone()
             .ready()
             .await
-            .map_err(|e| ClientError::Service(Box::new(e)))?
+            .map_err(|e| ClientError::HttpService(Box::new(e)))?
             .call(request)
             .await
-            .map_err(|e| ClientError::Service(Box::new(e)))?;
+            .map_err(|e| ClientError::HttpService(Box::new(e)))?;
 
         map_response_result(crate::parse_response(&response))
     }
 
     pub async fn submit_set(&self, urls: &[ContentUrl]) -> Result<SubmissionSuccess, ClientError> {
-        let request = crate::submit_set_request(
+        let request = crate::build_set_request(
             self.endpoint.clone(),
             &self.keyfile.key,
             &self.keyfile.location,
             urls,
         )
-        .map_err(ClientError::Request)?;
+        .map_err(ClientError::BuildRequest)?;
 
         let response = self
             .service
             .clone()
             .ready()
             .await
-            .map_err(|e| ClientError::Service(Box::new(e)))?
+            .map_err(|e| ClientError::HttpService(Box::new(e)))?
             .call(request)
             .await
-            .map_err(|e| ClientError::Service(Box::new(e)))?;
+            .map_err(|e| ClientError::HttpService(Box::new(e)))?;
 
         map_response_result(crate::parse_response(&response))
     }
 }
 
+/// Error for [`Client`]
 #[derive(Debug, thiserror::Error)]
 pub enum ClientError {
-    #[error("request")]
-    Request(#[source] RequestError),
+    #[error("can not build request")]
+    BuildRequest(#[source] BuildRequestError),
     #[error("tower-http client")]
-    Service(#[source] Box<dyn Error>),
-    #[error("response")]
-    Response(#[source] ResponseError),
-    #[error("IndexNow API")]
+    HttpService(#[source] Box<dyn Error>),
+    #[error("can not parse response")]
+    ParseResponse(#[source] ParseResponseError),
+    #[error("unsuccessful IndexNow submission")]
     IndexNow(#[source] SubmissionError),
 }

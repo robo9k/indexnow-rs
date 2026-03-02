@@ -27,7 +27,7 @@ impl std::fmt::Display for EndpointUrl {
 impl std::str::FromStr for EndpointUrl {
     type Err = ParseEndpointUrlError;
 
-    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         use http::uri::Scheme;
 
         let uri = s
@@ -73,7 +73,7 @@ static KEY_REGEX: once_cell::sync::Lazy<regex::Regex> = once_cell::sync::Lazy::n
 impl std::str::FromStr for Key {
     type Err = ParseKeyError;
 
-    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         if KEY_REGEX.is_match(s) {
             Ok(Self(s.to_string()))
         } else {
@@ -110,7 +110,7 @@ impl std::fmt::Display for KeyfileUrl {
 impl std::str::FromStr for KeyfileUrl {
     type Err = ParseKeyfileUrlError;
 
-    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         use http::uri::Scheme;
 
         let uri = s
@@ -210,7 +210,7 @@ impl std::fmt::Display for ContentUrl {
 impl std::str::FromStr for ContentUrl {
     type Err = ParseContentUrlError;
 
-    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         use http::uri::Scheme;
 
         let uri = s
@@ -246,18 +246,26 @@ pub struct ParseContentUrlError(());
 // TODO: urls[*].path startsWith key_location.path.directory
 // TODO: is wrangling newtypes infallible?
 
+/// Error for [`build_one_request`] and [`build_set_request`]
 #[derive(Debug, thiserror::Error)]
-#[error("request")]
-pub struct RequestError {
+#[error("can not build HTTP request")]
+pub struct BuildRequestError {
     source: Box<dyn std::error::Error + Send + Sync + 'static>,
 }
 
-pub(crate) fn submit_one_request(
+/// Build submission HTTP request for one content URL
+///
+/// This is used internally by [`Client::submit_one`].
+///
+/// [`build_set_request`] is for a set of URLs.
+///
+/// Also see [`parse_response`].
+pub fn build_one_request(
     endpoint: EndpointUrl,
     key: &Key,
     key_location: &KeyfileLocation,
     url: &ContentUrl,
-) -> Result<http::Request<Body>, RequestError> {
+) -> Result<http::Request<Body>, BuildRequestError> {
     #[derive(Debug, serde::Serialize)]
     struct Query<'a> {
         url: &'a ContentUrl,
@@ -278,36 +286,43 @@ pub(crate) fn submit_one_request(
 
     let mut path_and_query = endpoint.0.path().to_owned();
     path_and_query.push('?');
-    path_and_query.push_str(
-        &serde_urlencoded::to_string(&query).map_err(|e| RequestError {
+    path_and_query.push_str(&serde_urlencoded::to_string(&query).map_err(|e| {
+        BuildRequestError {
             source: Box::new(e),
-        })?,
-    );
+        }
+    })?);
 
     let mut parts = endpoint.0.clone().into_parts();
-    parts.path_and_query = Some(path_and_query.parse().map_err(|e| RequestError {
+    parts.path_and_query = Some(path_and_query.parse().map_err(|e| BuildRequestError {
         source: Box::new(e),
     })?);
 
     let request = http::Request::builder()
-        .uri(http::Uri::from_parts(parts).map_err(|e| RequestError {
+        .uri(http::Uri::from_parts(parts).map_err(|e| BuildRequestError {
             source: Box::new(e),
         })?)
         .method(http::Method::GET);
 
     request
         .body(http_body_util::Full::<bytes::Bytes>::default())
-        .map_err(|e| RequestError {
+        .map_err(|e| BuildRequestError {
             source: Box::new(e),
         })
 }
 
-pub(crate) fn submit_set_request(
+/// Build submission HTTP request for set of content URLs
+///
+/// This is used internally by [`Client::submit_set`].
+///
+/// [`build_one_request`] is for one URL.
+///
+/// Also see [`parse_response`].
+pub fn build_set_request(
     endpoint: EndpointUrl,
     key: &Key,
     key_location: &KeyfileLocation,
     urls: &[ContentUrl],
-) -> Result<http::Request<Body>, RequestError> {
+) -> Result<http::Request<Body>, BuildRequestError> {
     #[derive(Debug, serde::Serialize)]
     struct UrlSet<'a> {
         host: &'a str,
@@ -342,17 +357,20 @@ pub(crate) fn submit_set_request(
         url_list: urls,
     };
 
-    let body = serde_json::to_vec(&url_set).map_err(|e| RequestError {
+    let body = serde_json::to_vec(&url_set).map_err(|e| BuildRequestError {
         source: Box::new(e),
     })?;
 
     request
         .body(http_body_util::Full::new(bytes::Bytes::from(body)))
-        .map_err(|e| RequestError {
+        .map_err(|e| BuildRequestError {
             source: Box::new(e),
         })
 }
 
+/// Successful submission responses
+///
+/// Also see [`SubmissionError`] and [`SubmissionResult`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SubmissionSuccess {
     /// Submission was accepted and processed
@@ -380,6 +398,9 @@ impl RateLimitError {
     }
 }
 
+/// Unsuccessful submission responses
+///
+/// Also see [`SubmissionSuccess`], [`SubmissionResult`] and [`ParseResponseError`].
 #[derive(Debug, thiserror::Error)]
 pub enum SubmissionError {
     #[error("bad request")]
@@ -392,17 +413,26 @@ pub enum SubmissionError {
     TooManyRequests(RateLimitError),
 }
 
+/// Error for [`parse_response`]
 #[derive(Debug, thiserror::Error)]
-pub enum ResponseError {
-    #[error("undefined HTTP status code")]
+pub enum ParseResponseError {
+    #[error("undefined response HTTP status")]
     UndefinedStatus(http::StatusCode),
-    #[error("can not parse header")]
+    #[error("can not parse response HTTP header")]
     ParseHeader(http::HeaderName, headers::Error, http::StatusCode),
 }
 
+/// `Result` for IndexNow domain response, minus [`ParseResponseError`]
+pub type SubmissionResult = Result<SubmissionSuccess, SubmissionError>;
+
+/// Parse HTTP submission response
+///
+/// This is used internally by [`Client::submit_one`] and [`Client::submit_set`].
+///
+/// Also see [`build_one_request`] and [`build_set_request`].
 pub fn parse_response<B: http_body::Body>(
     response: &http::Response<B>,
-) -> std::result::Result<Result<SubmissionSuccess, SubmissionError>, ResponseError> {
+) -> Result<SubmissionResult, ParseResponseError> {
     use headers::HeaderMapExt as _;
     use http::StatusCode;
 
@@ -418,7 +448,7 @@ pub fn parse_response<B: http_body::Body>(
         Ok(Err(SubmissionError::UnprocessableEntity))
     } else if response.status() == StatusCode::TOO_MANY_REQUESTS {
         let retry_after = response.headers().typed_try_get().map_err(|e| {
-            ResponseError::ParseHeader(http::header::RETRY_AFTER, e, response.status())
+            ParseResponseError::ParseHeader(http::header::RETRY_AFTER, e, response.status())
         })?;
         let retry_after = retry_after.map(|ra| match ra {
             headers_retry_after::RetryAfter::Date(date) => RetryAfter::Date(date),
@@ -427,7 +457,7 @@ pub fn parse_response<B: http_body::Body>(
         let rate_limit = RateLimitError { retry_after };
         Ok(Err(SubmissionError::TooManyRequests(rate_limit)))
     } else {
-        Err(ResponseError::UndefinedStatus(response.status()))
+        Err(ParseResponseError::UndefinedStatus(response.status()))
     }
 }
 
@@ -485,8 +515,8 @@ mod tests {
     }
 
     #[test]
-    fn test_submit_one_request() -> std::result::Result<(), Box<dyn std::error::Error>> {
-        let request = submit_one_request(
+    fn test_build_one_request() -> Result<(), Box<dyn std::error::Error>> {
+        let request = build_one_request(
             "https://api.indexnow.org/indexnow".parse()?,
             &"687a308e4eff49f994d89eb22f764514".parse()?,
             &KeyfileLocation::RootDirectory,
@@ -500,9 +530,8 @@ mod tests {
     }
 
     #[test]
-    fn test_submit_one_request_with_location() -> std::result::Result<(), Box<dyn std::error::Error>>
-    {
-        let request = submit_one_request(
+    fn test_build_one_request_with_location() -> Result<(), Box<dyn std::error::Error>> {
+        let request = build_one_request(
             "https://api.indexnow.org/indexnow".parse()?,
             &"687a308e4eff49f994d89eb22f764514".parse()?,
             &KeyfileLocation::Url("http://www.example.com/myIndexNowKey63638.txt".parse()?),
@@ -516,10 +545,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_submit_set_request() -> std::result::Result<(), Box<dyn std::error::Error>> {
+    async fn test_build_set_request() -> Result<(), Box<dyn std::error::Error>> {
         use http_body_util::BodyExt as _;
 
-        let request = submit_set_request(
+        let request = build_set_request(
             "https://api.indexnow.org/indexnow".parse()?,
             &"687a308e4eff49f994d89eb22f764514".parse()?,
             &KeyfileLocation::RootDirectory,
@@ -557,11 +586,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_submit_set_request_with_location(
-    ) -> std::result::Result<(), Box<dyn std::error::Error>> {
+    async fn test_build_set_request_with_location() -> Result<(), Box<dyn std::error::Error>> {
         use http_body_util::BodyExt as _;
 
-        let request = submit_set_request(
+        let request = build_set_request(
             "https://api.indexnow.org/indexnow".parse()?,
             &"687a308e4eff49f994d89eb22f764514".parse()?,
             &KeyfileLocation::Url("https://www.example.com/myIndexNowKey63638.txt".parse()?),
@@ -600,7 +628,7 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_429_response() -> std::result::Result<(), Box<dyn std::error::Error>> {
+    fn test_parse_429_response() -> Result<(), Box<dyn std::error::Error>> {
         let http_response = http::Response::builder()
             .status(http::StatusCode::TOO_MANY_REQUESTS)
             .header("Retry-After", "666")
